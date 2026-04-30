@@ -116,6 +116,22 @@ local function watcher_seems_alive()
 end
 
 -- ---------------------------------------------------------------------------
+-- Map a python interpreter path to its pythonw sibling.  pythonw.exe is
+-- the GUI-subsystem launcher that ships alongside python.exe in every
+-- modern CPython install -- runs the same code but with no allocated
+-- console.  When the user has Python on PATH as a bare 'python', the
+-- bare 'pythonw' is also on PATH.  When uploader_config.lua specifies
+-- a full path like 'C:\Python\python.exe', we swap the basename.
+-- ---------------------------------------------------------------------------
+local function to_pythonw(p)
+    if not p or p == '' then return 'pythonw' end
+    if p == 'python'     then return 'pythonw' end
+    if p == 'python.exe' then return 'pythonw.exe' end
+    local pw = p:gsub('python%.exe$', 'pythonw.exe'):gsub('python$', 'pythonw')
+    return pw
+end
+
+-- ---------------------------------------------------------------------------
 -- Public: try to launch the uploader watcher.  Returns (true, reason) if a
 -- launch was attempted, (false, reason) otherwise.  Cheap to call
 -- repeatedly thanks to the cooldown gate -- O(1) when nothing happens.
@@ -131,18 +147,25 @@ M.try_launch = function ()
     end
     last_launch_t = now
 
-    -- start /MIN spawns the cmd window minimized so it doesn't grab focus.
-    -- /D <dir> sets cwd so upload.py finds its sibling .env.  --quiet keeps
-    -- the console window calm: just one "online" line + per-cycle summaries
-    -- when something was actually sent.
-    local python = cfg.python or 'python'
+    -- Use pythonw.exe (Windows GUI subsystem) instead of python.exe so
+    -- the watcher process has NO console window at all -- no CMD flash
+    -- when launched, no minimized icon in the taskbar, no popup if
+    -- the user alt-tabs.  Combined with `start "" /B`, the start
+    -- command itself doesn't allocate a console either.
+    --
+    -- Falls back to plain `python` only if cfg.python_w is explicitly
+    -- set to nil/false; default behavior bumps the python path's
+    -- final segment from python.exe -> pythonw.exe.  cmd /c is GONE
+    -- from this launch line on purpose.
+    local python_exec = cfg.python_w or to_pythonw(cfg.python or 'python')
     local cmd = string.format(
-        'start /MIN "WarMap uploader" /D "%s" cmd /c %s upload.py --watch --quiet',
-        cfg.uploader_dir, python)
+        'start "" /B /D "%s" %s upload.py --watch --quiet',
+        cfg.uploader_dir, python_exec)
     os.execute(cmd)
-    console.print('[uploader_launcher] launched watcher')
+    console.print('[uploader_launcher] launched watcher (pythonw, hidden)')
     return true, 'launched'
 end
+
 
 -- ---------------------------------------------------------------------------
 -- Public: is auto-launch usable on this install?
