@@ -70,6 +70,35 @@ local CATEGORIES = {
     -- Multi-floor traversal points (cliffs, ropes, jumps)
     { kind = 'traversal',   patterns = { 'Traversal_' } },
 
+    -- Event-doors / firewalls / boss-fight barriers.  These are the
+    -- transient gates that close off an arena while a boss fight is
+    -- active and re-open afterward.  Without their own kind they used
+    -- to land in the catch-all 'interactable' bucket which made boss
+    -- arenas look like big black boxes in the viewer (the recorder
+    -- can't sample walkable cells through a closed firewall, so the
+    -- arena interior has no data; the surrounding actors were just
+    -- generic grey diamonds with no clue why).  Tagging them as
+    -- event_door lets the viewer style them distinctly + lets sister
+    -- plugins know "this is a transient barrier, not a real wall."
+    --
+    -- Skin patterns observed across boss encounters:
+    --   * Helltide world bosses:   "FX_BossRoom_*", "Boss_Door_*",
+    --                              "*_FireWall*", "Helltide_Maiden_Door"
+    --   * Hordes wave gates:       "DGN_Standard_Door_Lock_Sigil_Ancients_*"
+    --   * Vampire / Duriel arenas: "*_BossArena_*", "Boss_Arena_Wall*",
+    --                              "*_BossEncounter*Door*"
+    --   * Generic boss event:      "_Event_Door", "_Encounter_Door"
+    -- Order: BEFORE dungeon_entrance and other door buckets so the
+    -- more specific event-door label wins.
+    { kind = 'event_door', patterns = {
+        'BossRoom_Door',         'BossArena_Door',     'BossArena_Wall',
+        'Boss_Arena_',           'BossEncounter_',     'Boss_Door_',
+        'BossRoom_FireWall',     '_FireWall_Door',     '_Encounter_Door',
+        '_Event_Door',           'Helltide_Maiden_Door',
+        'DGN_Standard_Door_Lock_Sigil',     -- Hordes wave gates
+        'FX_BossRoom_',
+    }},
+
     -- Dungeon entrances / nightmare-dungeon doors / boss-room portals.
     -- The player typically stands on / walks into these to enter content.
     -- Order matters -- this must be checked BEFORE the generic portal
