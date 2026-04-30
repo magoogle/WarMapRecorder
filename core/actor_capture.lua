@@ -277,10 +277,37 @@ local SKIN_IGNORE_SUBSTR = {
 -- ignore-list, then stash the answer.  Subsequent encounters of the
 -- same skin are a single hash lookup.  This is the dominant per-pulse
 -- saving in dense zones with many actors of repeating skins.
+-- Dynamic ignore list, loaded from a sibling file the uploader writes
+-- on each cycle.  Empty if the file is missing.  Loaded ONCE at module
+-- load time -- the user reloads Lua to pick up new patterns, matching
+-- the rest of the recorder's load model.  Wrapped in pcall so a syntax
+-- error in the generated file doesn't take the recorder down.
+local _DYNAMIC_IGNORE = {}
+do
+    local ok, mod = pcall(require, 'core.ignore_dynamic')
+    if ok and type(mod) == 'table' then
+        _DYNAMIC_IGNORE = mod
+        if console and console.print then
+            console.print(string.format(
+                '[actor_capture] loaded %d dynamic ignore pattern(s)', #mod))
+        end
+    end
+end
+
 local function ignored(skin)
     local v = _ignored_cache[skin]
     if v ~= nil then return v end
     for _, s in ipairs(SKIN_IGNORE_SUBSTR) do
+        if skin:find(s, 1, true) then
+            _ignored_cache[skin] = true
+            return true
+        end
+    end
+    -- Then check the dynamic list (admin-added patterns from the server).
+    -- Lookup is the same plain-substring shape as the static list, so
+    -- adding 'BurningAether' here matches every skin containing that
+    -- substring without the admin needing to know about Lua patterns.
+    for _, s in ipairs(_DYNAMIC_IGNORE) do
         if skin:find(s, 1, true) then
             _ignored_cache[skin] = true
             return true
