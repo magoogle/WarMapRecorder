@@ -137,33 +137,36 @@ end
 -- repeatedly thanks to the cooldown gate -- O(1) when nothing happens.
 -- ---------------------------------------------------------------------------
 M.try_launch = function ()
+    -- INTENTIONAL NO-SPAWN.  The uploader watcher is now started by a
+    -- Windows scheduled task at user logon (registered by install.ps1)
+    -- and runs as a long-lived hidden pythonw process.  Lua never
+    -- spawns a watcher anymore -- doing so would force os.execute to
+    -- allocate a cmd.exe child, which flashes a console window briefly
+    -- regardless of the /B + pythonw flags we pass it.
+    --
+    -- This function stays as a status probe: callers can use
+    -- watcher_seems_alive() via M.is_alive() to decide whether to
+    -- show a "watcher offline" warning.  No relaunch from here.
     if not cfg then return false, 'no_config' end
-    local now = (get_time_since_inject and get_time_since_inject()) or os.time()
-    if (now - last_launch_t) < LAUNCH_COOLDOWN_S then
-        return false, 'cooldown'
-    end
     if watcher_seems_alive() then
         return false, 'already_running'
     end
-    last_launch_t = now
-
-    -- Use pythonw.exe (Windows GUI subsystem) instead of python.exe so
-    -- the watcher process has NO console window at all -- no CMD flash
-    -- when launched, no minimized icon in the taskbar, no popup if
-    -- the user alt-tabs.  Combined with `start "" /B`, the start
-    -- command itself doesn't allocate a console either.
-    --
-    -- Falls back to plain `python` only if cfg.python_w is explicitly
-    -- set to nil/false; default behavior bumps the python path's
-    -- final segment from python.exe -> pythonw.exe.  cmd /c is GONE
-    -- from this launch line on purpose.
-    local python_exec = cfg.python_w or to_pythonw(cfg.python or 'python')
-    local cmd = string.format(
-        'start "" /B /D "%s" %s upload.py --watch --quiet',
-        cfg.uploader_dir, python_exec)
-    os.execute(cmd)
-    console.print('[uploader_launcher] launched watcher (pythonw, hidden)')
-    return true, 'launched'
+    -- Watcher isn't responding -- log it once per cooldown window so
+    -- we don't spam the console, but don't try to restart.  The user
+    -- can manually start it (Task Scheduler -> WarMap Uploader -> Run)
+    -- or fix whatever broke it.
+    local now = (get_time_since_inject and get_time_since_inject()) or os.time()
+    if (now - last_launch_t) >= LAUNCH_COOLDOWN_S then
+        last_launch_t = now
+        if console and console.print then
+            console.print(
+                '[uploader_launcher] WATCHER OFFLINE: no fresh lockfile ' ..
+                '(checked ' .. (cfg.sidecar_dir or '?') .. '\\uploader.lock).  ' ..
+                'Sessions are queuing locally; start the WarMap Uploader ' ..
+                'task in Task Scheduler to flush them.')
+        end
+    end
+    return false, 'no_spawn_from_lua'
 end
 
 
