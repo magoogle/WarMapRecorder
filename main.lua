@@ -44,10 +44,16 @@ end
 --   WarMapRecorderPlugin.note_event('chest_opened', { actor='...', x=..., y=... })
 -- ---------------------------------------------------------------------------
 WarMapRecorderPlugin = {
-    is_recording = recorder.is_recording,
-    note_event   = recorder.note_event,
-    current      = recorder.current,
-    counts       = recorder.counts,
+    is_recording   = recorder.is_recording,
+    note_event     = recorder.note_event,
+    current        = recorder.current,
+    counts         = recorder.counts,
+    -- Active quest list for the current record (cached snapshot, polled
+    -- 0.5s by core.quest_capture).  Returns nil when not recording, when
+    -- the host doesn't expose get_quests(), or when the active activity
+    -- isn't on the QUEST_CAPTURE_KINDS allowlist (defaults to NMD-only).
+    -- Each entry is a plain { id = number, name = string } table.
+    current_quests = recorder.current_quests,
 }
 
 on_update(function ()

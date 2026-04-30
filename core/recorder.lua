@@ -10,8 +10,19 @@ local classifier        = require 'core.activity_classifier'
 local flush             = require 'core.flush'
 local grid_probe        = require 'core.grid_probe'
 local actor_capture     = require 'core.actor_capture'
+local quest_capture     = require 'core.quest_capture'
 local stream_writer     = require 'core.stream_writer'
 local uploader_launcher = require 'core.uploader_launcher'
+
+-- Activity kinds that should record quest state.  Quest data is most
+-- valuable in NMDs (variable objectives per sigil) but the same shape
+-- ("active quest text describes the current goal") applies to seasonal
+-- bounty / event-driven content too -- expand here when those need it.
+-- Keeping this as a set rather than a single string so adding more
+-- activity kinds is a one-line change.
+local QUEST_CAPTURE_KINDS = {
+    nmd = true,    -- nightmare dungeon (DGN_*) -- the headline use case
+}
 
 -- Cell resolution used by the merger when deriving walkable cells from
 -- player position samples.  Recorded into each session header so the
@@ -176,15 +187,27 @@ local function start_record(activity_kind, zone, world, world_id)
     actor_count      = 0
     grid_probe.reset()
     actor_capture.reset()
+    quest_capture.reset()
+
+    -- Quest capture: enable for activity kinds that benefit (NMDs at the
+    -- moment).  Take an initial snapshot here so the dump's header
+    -- carries the quest list active at session start -- a sibling plugin
+    -- reading the dump can correlate "at t=0 quest X was active" with
+    -- the actor entries observed during the run.
+    local capture_quests = QUEST_CAPTURE_KINDS[activity_kind] == true
+    quest_capture.set_enabled(capture_quests)
+    local initial_quests = capture_quests and quest_capture.initial_snapshot() or nil
 
     -- Note: we always capture, regardless of how much the server thinks
     -- it knows about this zone.  The server-side merger decides coverage;
     -- the recorder just streams whatever it sees, so missing pieces can
     -- still be filled in by anyone's session.
 
-    -- Open stream + write header line.
+    -- Open stream + write header line.  initial_quests is omitted for
+    -- non-NMD records so unrelated dump types don't grow a perpetually-
+    -- empty field.
     local path = (flush.dump_dir or '.') .. '\\' .. record.session_id .. '.ndjson'
-    local ok = stream_writer.start_session(path, {
+    local header = {
         type              = 'header',
         schema_version    = record.schema_version,
         session_id        = record.session_id,
@@ -195,7 +218,9 @@ local function start_record(activity_kind, zone, world, world_id)
         game_patch        = record.game_patch,
         started_at        = record.started_at,
         cell_resolution_m = CELL_RESOLUTION_M,
-    })
+    }
+    if initial_quests then header.initial_quests = initial_quests end
+    local ok = stream_writer.start_session(path, header)
     if not ok then
         console.print('[WarMapRecorder] FAILED to open stream for ' .. tostring(path))
     end
@@ -259,6 +284,7 @@ local function finalize_record(reason)
     actor_count     = 0
     grid_probe.reset()
     actor_capture.reset()
+    quest_capture.reset()
 end
 
 -- ---------------------------------------------------------------------------
@@ -600,6 +626,30 @@ M.pulse = function ()
         actor_capture.scan_pulse(now, floor_for_actors, rel_t, record.world)
     end
 
+    -- Quest capture: poll the host's active-quest list for changes and
+    -- emit a quest_change event when it differs from the last
+    -- snapshot.  Self-gated (does nothing unless set_enabled(true) at
+    -- start_record), self-throttled (POLL_INTERVAL_S internally) so
+    -- this stays effectively free on non-NMD activities and on NMD
+    -- pulses where nothing changed.  We DON'T short-circuit on
+    -- is_idle: a player standing in a boss room waiting for the
+    -- objective to update should still have that update captured.
+    if quest_capture.is_enabled() then
+        local change = quest_capture.poll_pulse(now)
+        if change then
+            append_event(now, 'quest_change', {
+                quests  = change.quests,
+                added   = change.delta.added,
+                removed = change.delta.removed,
+            }, pp_valid)
+            if settings.debug_mode then
+                console.print(string.format(
+                    '[WarMapRecorder] quest_change: +%d -%d (now %d active)',
+                    #change.delta.added, #change.delta.removed, #change.quests))
+            end
+        end
+    end
+
     -- Streaming writer auto-flushes every ~1s/64 lines on its own. We don't
     -- need a separate periodic flush here -- the previous design's "rewrite
     -- the whole record" pause is gone.
@@ -635,5 +685,12 @@ M.counts = function ()
         actors  = actor_count,
     }
 end
+
+-- Public read-only accessor for the most recent quest snapshot.  Sibling
+-- plugins (the future nightmare runner / objective HUD) call this to
+-- learn the active quest list without having to query the host directly
+-- or parse the dump.  Returns the cached array of { id, name } or nil
+-- when the recorder isn't capturing quests for the current activity.
+M.current_quests = function () return quest_capture.current() end
 
 return M
