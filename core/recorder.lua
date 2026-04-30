@@ -81,9 +81,16 @@ local limbo_started_t  = nil
 -- second, so consecutive samples are always <2m apart unless the world
 -- snapped the player elsewhere).  Reset to nil at session start so the
 -- first pulse never trips it.
+--
+-- Why 20m and not the original 50m: short-distance teleports (UC boss-
+-- room entries via portal-switch click, pit floor portals between
+-- close-spawned rooms) are typically 15-30m.  20m catches them while
+-- still being well above the ~2m max for natural movement between
+-- consecutive sample pulses.  False positives are still effectively
+-- impossible -- no D4 movement primitive crosses 20m in <500ms.
 local last_pulse_x      = nil
 local last_pulse_y      = nil
-local TELEPORT_THRESHOLD_M  = 50
+local TELEPORT_THRESHOLD_M  = 20
 local TELEPORT_THRESHOLD_M2 = TELEPORT_THRESHOLD_M * TELEPORT_THRESHOLD_M
 
 -- Motion tracker for the idle-skip heuristic.  last_motion_x/y is the
@@ -453,6 +460,12 @@ M.pulse = function ()
                 local detected_via = nil
                 if world_id and world_id ~= last_floor_world then
                     detected_via = 'world_id'
+                elseif world and last_world and world ~= last_world then
+                    -- World _name_ changed even though world_id didn't.
+                    -- Some UC dungeon variants reuse a world_id across
+                    -- a hub + boss-room pair but name them differently
+                    -- (e.g. X1_Undercity_BugCave vs X1_Undercity_BugCave_Boss).
+                    detected_via = 'world_name'
                 elseif pp_valid and last_pulse_x and last_pulse_y then
                     local dx = pp_valid:x() - last_pulse_x
                     local dy = pp_valid:y() - last_pulse_y
