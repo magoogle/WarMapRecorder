@@ -232,6 +232,50 @@ local CATEGORIES = {
         '_Well_',
     }},
 
+    -- ---------------------------------------------------------------
+    -- Loot items: gear drops on the ground (swords, armor, rings,
+    -- gems, materials).  Currently land in the catch-all 'interactable'
+    -- bucket which makes them indistinguishable from chests / doors /
+    -- other clickables in the viewer.  Splitting them out gives:
+    --   * users a 'Items' layer toggle (default OFF in the viewer --
+    --     ground drops are spatially noisy across sessions and clutter
+    --     pathing maps, but useful when analyzing loot density / boss
+    --     drop locations).
+    --   * three sub-kinds so the viewer can color uniques (gold) vs
+    --     legendaries (orange) vs everything else (white).
+    --
+    -- Order: most-specific first.  unique > legendary > generic so a
+    -- skin like 'sword_uniq25' lands in item_unique rather than
+    -- matching the generic '^sword_' weapon pattern below.
+    --
+    -- Order vs surrounding categories: placed BEFORE the npc_vendor /
+    -- npc fallbacks so items don't accidentally match _Crafter or
+    -- _Vendor patterns; AFTER more-specific buckets above so chests,
+    -- portals, etc. continue to win on ambiguous skins.
+    -- ---------------------------------------------------------------
+    { kind = 'item_unique',    patterns = {
+        '_uniq',           -- sword_uniq25, ring_uniqA, etc.
+        '_Unique_',        -- ItemBase_Unique_*
+        '^Unique_',
+    }},
+    { kind = 'item_legendary', patterns = {
+        '^LEG_',           -- LEG_base07 etc.
+    }},
+    { kind = 'item',           patterns = {
+        -- Weapons (D4 uses lowercase prefixes for item bases)
+        '^sword_',   '^axe_',    '^mace_',     '^bow_',     '^crossbow_',
+        '^staff_',   '^wand_',   '^dagger_',   '^polearm_', '^scythe_',
+        '^throwing_',
+        -- Armor slots
+        '^helm_',    '^chest_arm', '^pants_',  '^boots_',   '^gloves_',
+        '^shoulder', '^belt_',
+        -- Jewelry / off-hand
+        '^ring_',    '^amulet_',  '^focus_',   '^totem_',
+        '^offhand_', '^shield_',
+        -- Materials, gems, runes (typically capitalized in D4)
+        '^Gem_',     '^Rune_',    '^Mat_',
+    }},
+
     -- Generic NPC / town vendor (broad fallback for interactables)
     { kind = 'npc_vendor', patterns = {
         '_Crafter', '_Vendor', '_Healer', '_Service_', '_DustyTomes',
