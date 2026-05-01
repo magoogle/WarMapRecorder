@@ -176,7 +176,13 @@ end
 -- wires grid/actor callbacks so newly-discovered cells/actors stream
 -- straight to disk (no in-memory buffer beyond the dedup index).
 -- ---------------------------------------------------------------------------
-local function start_record(activity_kind, zone, world, world_id)
+-- Optional: information about the actor / zone we transitioned FROM.
+-- Set by start_record's optional `entered_via` arg, written into the
+-- session header so the server-side merger can build a zone-link graph
+-- ("BugCave_03 -> BugCave_03_Boss via Portal_X at coords ...").  Lets
+-- a future viewer / nav planner answer "I'm here, how do I get to
+-- zone Y?" by chaining outbound links across zones.
+local function start_record(activity_kind, zone, world, world_id, entered_via)
     local now = os.time()
     record = {
         schema_version = SCHEMA_VERSION,
@@ -188,6 +194,7 @@ local function start_record(activity_kind, zone, world, world_id)
         session_id     = gen_session_id(),
         started_at     = now,
         ended_at       = now,
+        entered_via    = entered_via,
     }
     record_start_t   = get_time_since_inject() or 0
     last_sample_t    = -1
@@ -239,6 +246,14 @@ local function start_record(activity_kind, zone, world, world_id)
         cell_resolution_m = CELL_RESOLUTION_M,
     }
     if initial_quests then header.initial_quests = initial_quests end
+    -- Zone-link breadcrumb: "we got here from <from_zone> via <actor>
+    -- at <pos>".  Populated by the zone-change branch in pulse() when
+    -- a link source can be heuristically identified (closest portal /
+    -- traversal / waypoint / dungeon entrance within ~5m of the
+    -- player's last position before the transition).  Server-side
+    -- merger aggregates across sessions to build the inter-zone
+    -- navigation graph.
+    if entered_via then header.entered_via = entered_via end
     local ok = stream_writer.start_session(path, header)
     if not ok then
         console.print('[WarMapRecorder] FAILED to open stream for ' .. tostring(path))
@@ -539,14 +554,46 @@ M.pulse = function ()
                 end
             end
         else
-            -- Different zone -> close out and start fresh.
+            -- Different zone -> close out and start fresh.  Before
+            -- finalizing, sniff the OLD zone's actor catalog for a
+            -- portal / dungeon entrance / waypoint / traversal near
+            -- the player's last valid position -- that's almost
+            -- certainly the actor they interacted with to get here.
+            -- Threads through to the new record's header.entered_via
+            -- so the server can build a "zone X reaches zone Y via
+            -- this actor at this position" graph across all sessions.
+            local link_source = nil
+            if last_pulse_x and last_pulse_y then
+                link_source = actor_capture.find_link_source(
+                    last_pulse_x, last_pulse_y, 5.0)
+            end
+            local entered_via = nil
+            if link_source then
+                entered_via = {
+                    from_zone     = record.zone,
+                    from_world    = record.world,
+                    from_world_id = record.world_id,
+                    actor_skin    = link_source.skin,
+                    actor_kind    = link_source.kind,
+                    actor_sno     = link_source.sno_id,
+                    actor_type_id = link_source.type_id,
+                    actor_x       = link_source.x,
+                    actor_y       = link_source.y,
+                    actor_z       = link_source.z,
+                    actor_floor   = link_source.floor,
+                }
+                console.print(string.format(
+                    '[WarMapRecorder] zone link: %s -> %s via %s @(%.1f,%.1f)',
+                    record.zone, zone, link_source.skin or '?',
+                    link_source.x or 0, link_source.y or 0))
+            end
             console.print(string.format(
                 '[WarMapRecorder] SPLIT: zone %s -> %s (world_id %s -> %s)',
                 tostring(record.zone), tostring(zone),
                 tostring(record.world_id), tostring(world_id)))
             finalize_record('zone_change')
             if settings.auto_start and activity then
-                start_record(activity, zone, world, world_id)
+                start_record(activity, zone, world, world_id, entered_via)
             end
         end
     else

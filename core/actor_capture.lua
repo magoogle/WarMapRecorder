@@ -637,4 +637,54 @@ M.snapshot = function ()
     return out
 end
 
+-- ---------------------------------------------------------------------------
+-- Zone-link source detection.  Used by recorder.lua at zone-change time to
+-- figure out WHICH actor (portal / dungeon entrance / waypoint) the
+-- player traveled THROUGH to reach the new zone.  We don't get a direct
+-- "you clicked X" event from the host, so the heuristic is:
+--   * find the closest actor of an allowed link kind within `radius_m`
+--     of the player's last valid position before the transition fired
+--   * rounded to int meters since dedup keys round to 1m anyway
+-- The result becomes the new record's header.entered_via field, and
+-- ultimately drives the server's outbound zone-link graph.
+-- ---------------------------------------------------------------------------
+local LINK_SOURCE_KINDS_DEFAULT = {
+    portal           = true,  portal_town       = true,  portal_helltide = true,
+    dungeon_entrance = true,  pit_exit          = true,  pit_floor_portal = true,
+    undercity_exit   = true,  traversal         = true,  waypoint        = true,
+    horde_gate       = true,
+}
+
+M.find_link_source = function (px, py, radius_m, allowed_kinds)
+    if not px or not py then return nil end
+    radius_m = radius_m or 5.0
+    allowed_kinds = allowed_kinds or LINK_SOURCE_KINDS_DEFAULT
+    local r2_best = radius_m * radius_m
+    local best = nil
+    for i = 1, #entries do
+        local e = entries[i]
+        if allowed_kinds[e.kind] then
+            local dx = (e.x or 0) - px
+            local dy = (e.y or 0) - py
+            local d2 = dx * dx + dy * dy
+            if d2 < r2_best then
+                r2_best = d2
+                best = e
+            end
+        end
+    end
+    if not best then return nil end
+    -- Slim copy: only the fields the server-side aggregator + viewer need.
+    return {
+        skin    = best.skin,
+        kind    = best.kind,
+        sno_id  = best.sno_id,
+        type_id = best.type_id,
+        x       = best.x,
+        y       = best.y,
+        z       = best.z,
+        floor   = best.floor,
+    }
+end
+
 return M
