@@ -14,14 +14,33 @@ local quest_capture     = require 'core.quest_capture'
 local stream_writer     = require 'core.stream_writer'
 local uploader_launcher = require 'core.uploader_launcher'
 
--- Activity kinds that should record quest state.  Quest data is most
--- valuable in NMDs (variable objectives per sigil) but the same shape
--- ("active quest text describes the current goal") applies to seasonal
--- bounty / event-driven content too -- expand here when those need it.
--- Keeping this as a set rather than a single string so adding more
--- activity kinds is a one-line change.
+-- Activity kinds that should record quest state.
+--
+-- Originally NMD-only ("variable objectives per sigil"), expanded to
+-- ALL activities because quest text is the cleanest hook for "what
+-- is the player meant to do here right now":
+--   * dungeons (NMD or open) -> objective text per affix
+--   * pit                    -> wave / boss progression
+--   * undercity              -> spirit-trail + boss-room state
+--   * hordes                 -> wave + aether-goblin / boon picks
+--   * overworld              -> ambient events, ambushes, world bosses,
+--                               legion events, helltide spawns
+--   * helltide               -> maiden / chest / cinder objectives
+--   * town                   -> seasonal hub quests, vendor unlocks
+--
+-- Cost when nothing changes: ~0 (poll_pulse short-circuits on
+-- diff-against-last-snapshot, and snapshot() itself is a single host
+-- API call that's already host-cached).  Worth capturing universally
+-- so sibling plugins (a future event scout, NMD runner, hordes
+-- coordinator) have one consistent data source.
 local QUEST_CAPTURE_KINDS = {
-    nmd = true,    -- nightmare dungeon (DGN_*) -- the headline use case
+    nmd       = true,
+    pit       = true,
+    undercity = true,
+    hordes    = true,
+    overworld = true,
+    helltide  = true,
+    town      = true,
 }
 
 -- Cell resolution used by the merger when deriving walkable cells from
