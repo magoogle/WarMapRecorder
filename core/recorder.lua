@@ -537,8 +537,25 @@ M.pulse = function ()
         end
     end
 
-    last_zone     = zone
-    last_world    = world
+    last_zone = zone
+    -- last_world deliberately NOT updated when the host briefly reports
+    -- a Limbo world (loading screen between two same-world-id rooms,
+    -- common in undercity sub-area portals).  Without this guard,
+    -- entering Limbo set last_world='Limbo*', and on the next pulse
+    -- when the host swung back to the real world name the comparison
+    -- `world ~= last_world` fired a spurious floor_change with
+    -- via='world_name' -- even though world_id never changed.  Result:
+    -- same-world-id rooms (BugCave_03 hub vs BugCave_03 boss room
+    -- reached via portal) ended up tagged as different floor numbers,
+    -- which the server-side merger then collapsed back into one
+    -- bucket because the world_id was identical.  Preserving the last
+    -- "real" world name through Limbo periods makes the post-Limbo
+    -- comparison stable, and the teleport-distance branch still picks
+    -- up legitimate same-world-id room jumps via the >20m position
+    -- heuristic.
+    if world and not world:find('Limbo', 1, true) then
+        last_world = world
+    end
     last_world_id = world_id
     last_activity = activity
     -- Track pulse-to-pulse position for the teleport-based floor detector.
